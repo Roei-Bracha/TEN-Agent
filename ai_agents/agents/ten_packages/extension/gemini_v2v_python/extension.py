@@ -68,7 +68,7 @@ from google.genai.types import (
     SpeechConfig,
     VoiceConfig,
     PrebuiltVoiceConfig,
-    ProactivityConfigDict,
+    ProactivityConfig,
     RealtimeInputConfig,
     AutomaticActivityDetection,
     StartSensitivity,
@@ -173,6 +173,9 @@ class GeminiRealtimeConfig(BaseConfig):
     greeting: str = ""
     transcribe_user: bool = True
     transcribe_agent: bool = True
+    affective_dialog: bool = False
+    proactive_audio: bool = False
+    # VAD settings
     start_of_speech_sensitivity: Optional[str] = None
     end_of_speech_sensitivity: Optional[str] = None
     prefix_padding_ms: Optional[int] = None
@@ -843,14 +846,15 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
             input_audio_transcription=(
                 {} if self.config.transcribe_user else None
             ),
-            enable_affective_dialog=(
-                True if self.config.affective_dialog else None
-            ),
-            proactivity=(
-                ProactivityConfigDict(proactive_audio=True)
-                if self.config.proactive_audio
-                else None
-            ),
+            # Future feature - have been announced but not available yet:
+            # enable_affective_dialog=(
+            #     True if self.config.affective_dialog else None
+            # ),
+            # proactivity=(
+            #     ProactivityConfig(proactive_audio=True)
+            #     if self.config.proactive_audio
+            #     else None
+            # ),
             system_instruction=Content(parts=[Part(text=self.config.prompt)]),
             tools=tools,
             speech_config=SpeechConfig(
