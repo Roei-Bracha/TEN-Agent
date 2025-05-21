@@ -70,6 +70,12 @@
       },
       "greeting": {
         "type": "string"
+      },
+      "transcribe_user": {
+        "type": "bool"
+      },
+      "transcribe_agent": {
+        "type": "bool"
       }
     },
     "audio_frame_in": [
