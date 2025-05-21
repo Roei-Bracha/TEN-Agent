@@ -76,6 +76,12 @@
       },
       "transcribe_agent": {
         "type": "bool"
+      },
+      "proactive_audio": {
+        "type": "bool"
+      },
+      "affective_dialog": {
+        "type": "bool"
       }
     },
     "audio_frame_in": [

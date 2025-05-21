@@ -7,6 +7,8 @@ An extension for integrating Gemini's Next Generation of **Multimodal** AI into 
 - Gemini **Multimodal** Integration: Leverage Gemini **Multimodal** models for voice-to-voice as well as text processing.
 - Configurable: Easily customize API keys, model settings, prompts, temperature, etc.
 - Async Queue Processing: Supports real-time message processing with task cancellation and prioritization.
+- **Affective Dialog**: Enables Gemini to adapt its response style to match the input expression and tone.
+- **Proactive Audio**: Allows Gemini to intelligently decide when not to respond if content is not relevant.
 
 ## API
 
@@ -61,3 +63,35 @@ Refer to the `api` definition in [manifest.json] and default values in [property
 | **Name**         | **Description**                           |
 |------------------|-------------------------------------------|
 | `pcm_frame`      | Audio frame output after voice processing |
+
+## Advanced Features
+
+### Affective Dialog
+
+This feature lets Gemini adapt its response style to the input expression and tone.
+
+To use affective dialog, set `enable_affective_dialog` to `true` in the setup message:
+
+```python
+config = types.LiveConnectConfig(
+    response_modalities=["AUDIO"],
+    enable_affective_dialog=True
+)
+```
+
+Note that affective dialog is currently only supported by the native audio output models.
+
+### Proactive Audio
+
+When this feature is enabled, Gemini can proactively decide not to respond if the content is not relevant.
+
+To use it, configure the proactivity field in the setup message and set `proactive_audio` to `true`:
+
+```python
+config = types.LiveConnectConfig(
+    response_modalities=["AUDIO"],
+    proactivity={'proactive_audio': True}
+)
+```
+
+Note that proactive audio is currently only supported by the native audio output models.

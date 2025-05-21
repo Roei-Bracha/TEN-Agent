@@ -68,6 +68,8 @@ from google.genai.types import (
     SpeechConfig,
     VoiceConfig,
     PrebuiltVoiceConfig,
+    GoogleSearch,
+    CodeExecution,
 )
 from google.genai.live import AsyncSession
 from PIL import Image
@@ -793,6 +795,10 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
             input_audio_transcription=(
                 {} if self.config.transcribe_user else None
             ),
+            enable_affective_dialog= True if self.config.affective_dialog else None,
+            proactivity = {
+                'proactive_audio': True
+            } if self.config.proactive_audio else None,
             system_instruction=Content(parts=[Part(text=self.config.prompt)]),
             tools=tools,
             speech_config=SpeechConfig(
@@ -800,7 +806,8 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                     prebuilt_voice_config=PrebuiltVoiceConfig(
                         voice_name=self.config.voice
                     )
-                )
+                ),
+                language_code=self.config.language,
             ),
             generation_config=GenerationConfig(
                 temperature=self.config.temperature,
