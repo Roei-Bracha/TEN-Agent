@@ -22,7 +22,7 @@ import traceback
 import time
 from google import genai
 import numpy as np
-from typing import Iterable, cast
+from typing import Iterable, cast, Optional
 
 import websockets
 
@@ -68,8 +68,11 @@ from google.genai.types import (
     SpeechConfig,
     VoiceConfig,
     PrebuiltVoiceConfig,
-    GoogleSearch,
-    CodeExecution,
+    ProactivityConfigDict,
+    RealtimeInputConfig,
+    AutomaticActivityDetection,
+    StartSensitivity,
+    EndSensitivity,
 )
 from google.genai.live import AsyncSession
 from PIL import Image
@@ -170,6 +173,10 @@ class GeminiRealtimeConfig(BaseConfig):
     greeting: str = ""
     transcribe_user: bool = True
     transcribe_agent: bool = True
+    start_of_speech_sensitivity: Optional[str] = None
+    end_of_speech_sensitivity: Optional[str] = None
+    prefix_padding_ms: Optional[int] = None
+    silence_duration_ms: Optional[int] = None
 
     def build_ctx(self) -> dict:
         return {
@@ -787,18 +794,63 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         tools.append(Tool(google_search={}))
         tools.append(Tool(code_execution={}))
 
+        start_of_speech_sensitivity = (
+            StartSensitivity.START_SENSITIVITY_UNSPECIFIED
+        )
+        end_of_speech_sensitivity = EndSensitivity.END_SENSITIVITY_UNSPECIFIED
+        if (
+            self.config.start_of_speech_sensitivity == "HIGH"
+            or self.config.start_of_speech_sensitivity
+            == StartSensitivity.START_SENSITIVITY_HIGH
+        ):
+            start_of_speech_sensitivity = (
+                StartSensitivity.START_SENSITIVITY_HIGH
+            )
+        elif (
+            self.config.start_of_speech_sensitivity == "LOW"
+            or self.config.start_of_speech_sensitivity
+            == StartSensitivity.START_SENSITIVITY_LOW
+        ):
+            start_of_speech_sensitivity = StartSensitivity.START_SENSITIVITY_LOW
+
+        if (
+            self.config.end_of_speech_sensitivity == "HIGH"
+            or self.config.end_of_speech_sensitivity
+            == EndSensitivity.END_SENSITIVITY_HIGH
+        ):
+            end_of_speech_sensitivity = EndSensitivity.END_SENSITIVITY_HIGH
+        elif (
+            self.config.end_of_speech_sensitivity == "LOW"
+            or self.config.end_of_speech_sensitivity
+            == EndSensitivity.END_SENSITIVITY_LOW
+        ):
+            end_of_speech_sensitivity = EndSensitivity.END_SENSITIVITY_LOW
+
         config = LiveConnectConfig(
             response_modalities=["AUDIO"],
+            realtime_input_config=RealtimeInputConfig(
+                automatic_activity_detection=AutomaticActivityDetection(
+                    disabled=not self.config.server_vad,
+                    start_of_speech_sensitivity=start_of_speech_sensitivity,
+                    end_of_speech_sensitivity=end_of_speech_sensitivity,
+                    prefix_padding_ms=self.config.prefix_padding_ms,
+                    silence_duration_ms=self.config.silence_duration_ms,
+                )
+            ),
             output_audio_transcription=(
                 {} if self.config and self.config.transcribe_agent else None
             ),
             input_audio_transcription=(
                 {} if self.config.transcribe_user else None
             ),
-            enable_affective_dialog= True if self.config.affective_dialog else None,
-            proactivity = {
-                'proactive_audio': True
-            } if self.config.proactive_audio else None,
+            enable_affective_dialog=(
+                True if self.config.affective_dialog else None
+            ),
+            proactivity=(
+                ProactivityConfigDict(proactive_audio=True)
+                if self.config.proactive_audio
+                else None
+            ),
             system_instruction=Content(parts=[Part(text=self.config.prompt)]),
             tools=tools,
             speech_config=SpeechConfig(

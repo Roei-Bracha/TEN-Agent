@@ -11,5 +11,7 @@
     "transcribe_user": true,
     "transcribe_agent": true,
     "proactive_audio": false,
-    "affective_dialog": false
+    "affective_dialog": false,
+    "start_of_speech_sensitivity": "START_SENSITIVITY_UNSPECIFIED",
+    "end_of_speech_sensitivity": "END_SENSITIVITY_UNSPECIFIED"
 }
