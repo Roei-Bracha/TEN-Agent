@@ -846,15 +846,8 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
             input_audio_transcription=(
                 {} if self.config.transcribe_user else None
             ),
-            # Future feature - have been announced but not available yet:
-            # enable_affective_dialog=(
-            #     True if self.config.affective_dialog else None
-            # ),
-            # proactivity=(
-            #     ProactivityConfig(proactive_audio=True)
-            #     if self.config.proactive_audio
-            #     else None
-            # ),
+            enable_affective_dialog= True if self.config.affective_dialog else None,
+            proactivity={'proactive_audio': True} if self.config.proactive_audio else None,
             system_instruction=Content(parts=[Part(text=self.config.prompt)]),
             tools=tools,
             speech_config=SpeechConfig(
