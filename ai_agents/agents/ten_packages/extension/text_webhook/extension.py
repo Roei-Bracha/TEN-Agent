@@ -50,7 +50,7 @@ class WebhookConfig(BaseConfig):
     )
     method: str = "POST"
     timeout: int = 10
-    send_final_only: bool = False  # Only send final text data when True
+    send_final_only: bool = True  # Only send final text data when True
     data_type: str = (
         "transcribe"  # Type of data being sent (transcribe, raw, etc.)
     )
@@ -762,19 +762,32 @@ class textWebhookExtension(AsyncExtension):
                                             "text_ts", int(time.time() * 1000)
                                         )
 
-                                        # Send directly to webhook
-                                        ten_env.log_info(
-                                            f"Sending parsed message collector data to webhook: text='{text}'"
-                                        )
-                                        await self.send_message_to_webhook(
-                                            text,
-                                            ten_env,
-                                            data,
-                                            is_final,
-                                            end_of_segment,
-                                            stream_id,
-                                            text_ts,
-                                        )
+                                        # Check if we should send based on configuration (same logic as standard path)
+                                        should_send = True
+                                        if self.config.send_final_only and not is_final:
+                                            ten_env.log_info(
+                                                "Skipping non-final message collector text due to send_final_only=true"
+                                            )
+                                            should_send = False
+
+                                        # Send to webhook if appropriate
+                                        if should_send:
+                                            ten_env.log_info(
+                                                f"Sending parsed message collector data to webhook: text='{text}'"
+                                            )
+                                            await self.send_message_to_webhook(
+                                                text,
+                                                ten_env,
+                                                data,
+                                                is_final,
+                                                end_of_segment,
+                                                stream_id,
+                                                text_ts,
+                                            )
+                                        else:
+                                            ten_env.log_info(
+                                                "Not sending message collector data due to configuration"
+                                            )
                                         return
                                 except json.JSONDecodeError:
                                     # Not JSON, use the raw content
