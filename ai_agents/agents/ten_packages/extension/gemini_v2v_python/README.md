@@ -9,6 +9,7 @@ An extension for integrating Gemini's Next Generation of **Multimodal** AI into 
 - Async Queue Processing: Supports real-time message processing with task cancellation and prioritization.
 - **Affective Dialog**: Enables Gemini to adapt its response style to match the input expression and tone.
 - **Proactive Audio**: Allows Gemini to intelligently decide when not to respond if content is not relevant.
+- **Session Resumption**: Supports session resumption based on the [Gemini Live API documentation](https://ai.google.dev/gemini-api/docs/live#session-resumption).
 
 ## API
 
@@ -95,3 +96,85 @@ config = types.LiveConnectConfig(
 ```
 
 Note that proactive audio is currently only supported by the native audio output models.
+
+## Session Resumption
+
+The extension now supports **session resumption** based on the [Gemini Live API documentation](https://ai.google.dev/gemini-api/docs/live#session-resumption). This feature helps prevent session termination when the server periodically resets the WebSocket connection.
+
+### Configuration
+
+Session resumption can be configured using the following parameter:
+
+```json
+{
+  "enable_session_resumption": true
+}
+```
+
+By default, session resumption is **enabled** (`true`).
+
+### How it Works
+
+1. **Session Setup**: When session resumption is enabled, the extension configures the session to receive resumption updates from the server.
+
+2. **Handle Storage**: The server periodically sends `SessionResumptionUpdate` messages containing a resumption handle. The extension automatically stores the latest handle.
+
+3. **Automatic Reconnection**: When reconnecting (due to network issues or server resets), the extension automatically uses the stored resumption handle to resume the previous session context.
+
+4. **GoAway Handling**: The extension handles `GoAway` messages from the server, which signal that the connection will soon be terminated, allowing for graceful preparation.
+
+### Benefits
+
+- **Improved Reliability**: Sessions can survive temporary network interruptions and server-side connection resets
+- **Context Preservation**: Previous conversation context is maintained across reconnections
+- **Seamless User Experience**: Users don't notice when reconnections happen
+- **Better Resource Utilization**: Avoids losing conversation history and context
+
+### Logs
+
+When session resumption is active, you'll see logs like:
+
+```
+Starting new session with resumption enabled
+Session resumption handle updated: abcd1234efgh5678...
+Server sent GoAway message. Connection will be terminated in 10000ms
+Starting connection with session resumption handle: abcd1234efgh5678...
+```
+
+### Configuration Example
+
+```json
+{
+  "api_key": "your_gemini_api_key",
+  "model": "gemini-2.0-flash-live-001",
+  "enable_session_resumption": true,
+  "language": "en-US",
+  "voice": "Puck",
+  "server_vad": true,
+  "transcribe_user": true,
+  "transcribe_agent": true
+}
+```
+
+## Other Configuration Options
+
+- `enable_session_resumption`: Enable/disable session resumption (default: `true`)
+- `audio_buffer_threshold`: Audio buffer size threshold for processing (default: `1024`)
+- `start_of_speech_sensitivity`: VAD sensitivity for speech start detection
+- `end_of_speech_sensitivity`: VAD sensitivity for speech end detection
+- `prefix_padding_ms`: Padding before speech detection
+- `silence_duration_ms`: Silence duration for speech end detection
+- `affective_dialog`: Enable affective dialog features
+- `proactive_audio`: Enable proactive audio responses
+
+## Dependencies
+
+This extension requires:
+- `google-genai` Python package
+- `websockets` for WebSocket communication
+- `PIL` for image processing
+- `numpy` for audio processing
+
+## Note
+
+Session resumption is automatically managed by the extension and requires no additional user intervention. The feature is designed to work transparently in the background to improve connection reliability.

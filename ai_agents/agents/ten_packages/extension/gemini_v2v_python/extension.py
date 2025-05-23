@@ -73,6 +73,8 @@ from google.genai.types import (
     AutomaticActivityDetection,
     StartSensitivity,
     EndSensitivity,
+    MediaResolution,
+    SessionResumptionConfig,
 )
 from google.genai.live import AsyncSession
 from PIL import Image
@@ -175,11 +177,15 @@ class GeminiRealtimeConfig(BaseConfig):
     transcribe_agent: bool = True
     affective_dialog: bool = False
     proactive_audio: bool = False
+    # Audio processing settings
+    audio_buffer_threshold: int = 1024
     # VAD settings
     start_of_speech_sensitivity: Optional[str] = None
     end_of_speech_sensitivity: Optional[str] = None
     prefix_padding_ms: Optional[int] = None
     silence_duration_ms: Optional[int] = None
+    # Session resumption settings
+    enable_session_resumption: bool = True
 
     def build_ctx(self) -> dict:
         return {
@@ -202,7 +208,7 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         self.stream_id: int = 0
         self.remote_stream_id: int = 0
         self.channel_name: str = ""
-        self.audio_len_threshold: int = 1024
+        self.audio_len_threshold: int = 512  # Will be updated from config
 
         self.completion_times = []
         self.connect_times = []
@@ -223,6 +229,10 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         self.ten_env = None
         self.is_processing_audio = False
         self.tasks = []
+        self.last_audio_time = time.time()  # Track last audio received
+
+        # Session resumption
+        self.session_resumption_handle: Optional[str] = None
 
     async def on_init(self, ten_env: AsyncTenEnv) -> None:
         await super().on_init(ten_env)
@@ -238,6 +248,9 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         self.config = await GeminiRealtimeConfig.create_async(ten_env=ten_env)
         ten_env.log_info(f"config: {self.config}")
 
+        # Update audio threshold from config
+        self.audio_len_threshold = self.config.audio_buffer_threshold
+
         if not self.config.api_key:
             ten_env.log_error("api_key is required")
             return
@@ -248,6 +261,7 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
 
             self.client = genai.Client(
                 api_key=self.config.api_key,
+                http_options={"api_version": "v1beta"},
             )
 
             self.tasks = []
@@ -325,7 +339,19 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
 
             # Get session configuration
             config = self._get_session_config()
-            ten_env.log_info("Starting connection to Gemini service...")
+
+            # Log session resumption status
+            if (
+                self.config.enable_session_resumption
+                and self.session_resumption_handle
+            ):
+                ten_env.log_info(
+                    f"Starting connection with session resumption handle: {self.session_resumption_handle[:20]}..."
+                )
+            elif self.config.enable_session_resumption:
+                ten_env.log_info("Starting new session with resumption enabled")
+            else:
+                ten_env.log_info("Starting connection to Gemini service...")
 
             # Connect to session
             async with self.client.aio.live.connect(
@@ -447,6 +473,35 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                                     response.tool_call.function_calls
                                 )
                             )
+
+                        # Handle session resumption updates
+                        elif response.session_resumption_update:
+                            update = response.session_resumption_update
+                            if update.resumable and update.new_handle:
+                                self.session_resumption_handle = (
+                                    update.new_handle
+                                )
+                                ten_env.log_info(
+                                    f"Session resumption handle updated: {update.new_handle[:20]}..."
+                                )
+
+                        # Handle GoAway messages
+                        elif response.go_away:
+                            time_left = response.go_away.time_left
+                            ten_env.log_warn(
+                                f"Server sent GoAway message. Connection will be terminated in {time_left}ms"
+                            )
+                            # Optionally, prepare for graceful shutdown or reconnection
+                            try:
+                                time_left_ms = (
+                                    int(time_left) if time_left else 0
+                                )
+                                if time_left_ms < 5000:  # Less than 5 seconds
+                                    ten_env.log_info(
+                                        "Preparing for connection termination..."
+                                    )
+                            except (ValueError, TypeError):
+                                pass
 
                 except websockets.exceptions.ConnectionClosedOK:
                     ten_env.log_info("Connection closed normally")
@@ -707,6 +762,7 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         """Queue audio input for processing without blocking."""
         # Add audio to buffer
         self.buff += buff
+        self.last_audio_time = time.time()  # Update last audio time
 
         # If we have enough audio data, queue it for processing
         if len(self.buff) >= self.audio_len_threshold:
@@ -725,10 +781,33 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                 except:
                     pass
 
+    async def _flush_audio_buffer(self):
+        """Flush remaining audio in buffer if timeout reached."""
+        if len(self.buff) > 0:
+            current_buff = self.buff
+            self.buff = bytearray()
+            try:
+                self.audio_queue.put_nowait(current_buff)
+            except asyncio.QueueFull:
+                try:
+                    self.audio_queue.get_nowait()
+                    self.audio_queue.put_nowait(current_buff)
+                except:
+                    pass
+
     async def _process_audio_queue(self, ten_env: AsyncTenEnv):
         """Process queued audio data in background."""
         while not self.stopped:
             try:
+                # Check for timeout-based buffer flush (every 100ms)
+                current_time = time.time()
+                if (
+                    current_time - self.last_audio_time > 0.5  # 500ms timeout
+                    and len(self.buff) > 0
+                ):
+                    await self._flush_audio_buffer()
+                    ten_env.log_debug("Flushed audio buffer due to timeout")
+
                 # Wait for audio data from the queue
                 if self.audio_queue.empty():
                     await asyncio.sleep(0.01)
@@ -754,6 +833,9 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                         )
                     except Exception as e:
                         ten_env.log_error(f"Failed to send audio: {e}")
+                else:
+                    # Log when audio is dropped due to connection issues
+                    ten_env.log_warn("Dropping audio: not connected to session")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -831,6 +913,13 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
 
         config = LiveConnectConfig(
             response_modalities=["AUDIO"],
+            media_resolution="MEDIA_RESOLUTION_MEDIUM",
+            context_window_compression=(
+                types.ContextWindowCompressionConfig(
+                    trigger_tokens=12800,
+                    sliding_window=types.SlidingWindow(target_tokens=12800),
+                )
+            ),
             realtime_input_config=RealtimeInputConfig(
                 automatic_activity_detection=AutomaticActivityDetection(
                     disabled=not self.config.server_vad,
@@ -846,8 +935,19 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
             input_audio_transcription=(
                 {} if self.config.transcribe_user else None
             ),
-            enable_affective_dialog= True if self.config.affective_dialog else None,
-            proactivity={'proactive_audio': True} if self.config.proactive_audio else None,
+            enable_affective_dialog=(
+                True if self.config.affective_dialog else None
+            ),
+            proactivity=(
+                {"proactive_audio": True}
+                if self.config.proactive_audio
+                else None
+            ),
+            session_resumption=(
+                SessionResumptionConfig(handle=self.session_resumption_handle)
+                if self.config.enable_session_resumption
+                else None
+            ),
             system_instruction=Content(parts=[Part(text=self.config.prompt)]),
             tools=tools,
             speech_config=SpeechConfig(
