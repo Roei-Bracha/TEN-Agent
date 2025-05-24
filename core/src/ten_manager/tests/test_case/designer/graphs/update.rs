@@ -24,13 +24,12 @@ mod tests {
     };
     use ten_rust::{
         graph::{
-            connection::{GraphConnection, GraphDestination, GraphMessageFlow},
-            node::GraphNode,
+            connection::{
+                GraphConnection, GraphDestination, GraphLoc, GraphMessageFlow,
+            },
+            node::{GraphNode, GraphNodeType},
         },
-        pkg_info::{
-            constants::PROPERTY_JSON_FILENAME, pkg_type::PkgType,
-            pkg_type_and_name::PkgTypeAndName,
-        },
+        pkg_info::constants::PROPERTY_JSON_FILENAME,
     };
     use uuid::Uuid;
 
@@ -108,20 +107,22 @@ mod tests {
 
         // Create test nodes and connections.
         let nodes = [GraphNode {
-            type_and_name: PkgTypeAndName {
-                pkg_type: PkgType::Extension,
-                name: "node1".to_string(),
-            },
-            addon: "test_addon".to_string(),
+            type_: GraphNodeType::Extension,
+            name: "node1".to_string(),
+            addon: Some("test_addon".to_string()),
             extension_group: None,
             app: None,
             property: None,
+            source_uri: None,
         }];
 
         // Create a connection with message flow.
         let dest = GraphDestination {
-            app: None,
-            extension: "node2".to_string(),
+            loc: GraphLoc {
+                app: None,
+                extension: Some("node2".to_string()),
+                subgraph: None,
+            },
             msg_conversion: None,
         };
 
@@ -129,8 +130,11 @@ mod tests {
             GraphMessageFlow { name: "test_cmd".to_string(), dest: vec![dest] };
 
         let connection = GraphConnection {
-            app: None,
-            extension: "node1".to_string(),
+            loc: GraphLoc {
+                app: None,
+                extension: Some("node1".to_string()),
+                subgraph: None,
+            },
             cmd: Some(vec![message_flow]),
             data: None,
             audio_frame: None,
@@ -145,8 +149,11 @@ mod tests {
             nodes: nodes
                 .iter()
                 .map(|node| GraphNodeForUpdate {
-                    name: node.type_and_name.name.clone(),
-                    addon: node.addon.clone(),
+                    name: node.name.clone(),
+                    addon: node
+                        .addon
+                        .clone()
+                        .expect("Extension node must have an addon"),
                     extension_group: node.extension_group.clone(),
                     app: node.app.clone(),
                     property: node.property.clone(),
@@ -327,14 +334,13 @@ mod tests {
 
         // Create test nodes but empty connections.
         let nodes = [GraphNode {
-            type_and_name: PkgTypeAndName {
-                pkg_type: PkgType::Extension,
-                name: "new_node".to_string(),
-            },
-            addon: "test_addon".to_string(),
+            type_: GraphNodeType::Extension,
+            name: "new_node".to_string(),
+            addon: Some("test_addon".to_string()),
             extension_group: None,
             app: Some("http://example.com:8000".to_string()),
             property: None,
+            source_uri: None,
         }];
         let connections = vec![]; // Empty connections.
 
@@ -344,8 +350,11 @@ mod tests {
             nodes: nodes
                 .iter()
                 .map(|node| GraphNodeForUpdate {
-                    name: node.type_and_name.name.clone(),
-                    addon: node.addon.clone(),
+                    name: node.name.clone(),
+                    addon: node
+                        .addon
+                        .clone()
+                        .expect("Extension node must have an addon"),
                     extension_group: node.extension_group.clone(),
                     app: node.app.clone(),
                     property: node.property.clone(),
