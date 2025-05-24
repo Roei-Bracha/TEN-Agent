@@ -327,6 +327,36 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                                         self.loop.create_task(
                                             self._handle_tool_call(func_calls)
                                         )
+                                    elif response.session_resumption_update:
+                                        update = response.session_resumption_update
+                                        if update.resumable and update.new_handle:
+                                            self.session_resumption_handle = (
+                                                update.new_handle
+                                            )
+                                            ten_env.log_info(
+                                                f"Session resumption handle updated: {update.new_handle[:20]}..."
+                                            )
+
+                                        # Handle GoAway messages
+                                    elif response.go_away:
+                                        time_left = response.go_away.time_left
+                                        ten_env.log_warn(
+                                            f"Server sent GoAway message. Connection will be terminated in {time_left}ms"
+                                        )
+                                        # Optionally, prepare for graceful shutdown or reconnection
+                                        try:
+                                            time_left_ms = (
+                                                int(time_left) if time_left else 0
+                                            )
+                                            if time_left_ms < 5000:  # Less than 5 seconds
+                                                ten_env.log_info(
+                                                    "Preparing for connection termination..."
+                                                )
+                                        except (ValueError, TypeError):
+                                            pass
+                                    self._handle_transcriptions(
+                                        ten_env, response.server_content
+                                    )
                                 except Exception:
                                     traceback.print_exc()
                                     ten_env.log_error(
@@ -338,6 +368,42 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                             break
             except Exception as e:
                 self.ten_env.log_error(f"Failed to handle loop {e}")
+
+    def _handle_transcriptions(
+            self, ten_env: AsyncTenEnv, server_content
+    ) -> None:
+        """Handle transcription responses with lower priority."""
+        # Process input transcription
+        if (
+                self.config.input_transcript
+                and server_content.input_transcription
+                and server_content.input_transcription.text
+        ):
+            # Create task with lower priority
+            asyncio.create_task(
+                self._send_transcript(
+                    server_content.input_transcription.text,
+                    Role.User,
+                    is_final=server_content.turn_complete or False,
+                    end_of_segment=True,
+                )
+            )
+
+        # Process output transcription
+        if (
+                self.config.output_transcript
+                and server_content.output_transcription
+                and server_content.output_transcription.text
+        ):
+            # Create task with lower priority
+            asyncio.create_task(
+                self._send_transcript(
+                    server_content.output_transcription.text,
+                    Role.Assistant,
+                    is_final=server_content.turn_complete or False,
+                    end_of_segment=True,
+                )
+            )
 
     async def send_audio_out(
         self, ten_env: AsyncTenEnv, audio_data: bytes, **args: TTSPcmOptions
