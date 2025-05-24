@@ -186,6 +186,8 @@ class GeminiRealtimeConfig(BaseConfig):
     silence_duration_ms: Optional[int] = None
     # Session resumption settings
     enable_session_resumption: bool = True
+    # Video settings - default to False to save costs
+    send_video: bool = False
 
     def build_ctx(self) -> dict:
         return {
@@ -247,6 +249,14 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
 
         self.config = await GeminiRealtimeConfig.create_async(ten_env=ten_env)
         ten_env.log_info(f"config: {self.config}")
+
+        # Log video configuration status for user awareness
+        if self.config.send_video:
+            ten_env.log_info(
+                "Video sending is ENABLED - this will increase API costs"
+            )
+        else:
+            ten_env.log_info("Video sending is DISABLED - saving API costs")
 
         # Update audio threshold from config
         self.audio_len_threshold = self.config.audio_buffer_threshold
@@ -682,6 +692,11 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
 
     async def on_video_frame(self, async_ten_env, video_frame):
         await super().on_video_frame(async_ten_env, video_frame)
+
+        # Check if video sending is enabled
+        if not self.config.send_video:
+            return  # Don't process video frames when video sending is disabled
+
         # Only queue new frames if the queue is not too full
         # This prevents video processing from using too many resources
         if self.image_queue.qsize() < 3:  # Limit queue size
@@ -692,6 +707,14 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
 
     async def _on_video(self, _: AsyncTenEnv):
         """Process video frames at a lower priority with less frequent updates."""
+
+        # Check if video sending is enabled
+        if not self.config.send_video:
+            # Don't process video at all when video sending is disabled
+            while not self.stopped:
+                await asyncio.sleep(1.0)  # Sleep to avoid busy waiting
+            return
+
         last_frame_time = 0
         min_frame_interval = 2.0  # Minimum seconds between video frame updates
 

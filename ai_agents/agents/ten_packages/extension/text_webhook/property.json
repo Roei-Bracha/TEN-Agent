@@ -8,5 +8,6 @@
     "send_on_close": true,
     "send_on_start": true,
     "direct_forward": false,
-    "send_on_user_events": true
+    "send_on_user_events": true,
+    "send_video": false
 }
