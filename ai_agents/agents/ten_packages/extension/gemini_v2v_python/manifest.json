@@ -95,9 +95,10 @@
       "silence_duration_ms": {
         "type": "int32"
       },
-      "send_video": {
-        "type": "bool"
+      "sliding_window": {
+        "type": "int32"
       }
+}
     },
     "audio_frame_in": [
       {

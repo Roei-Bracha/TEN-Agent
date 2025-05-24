@@ -186,8 +186,9 @@ class GeminiRealtimeConfig(BaseConfig):
     silence_duration_ms: Optional[int] = None
     # Session resumption settings
     enable_session_resumption: bool = True
-    # Video settings - default to False to save costs
-    send_video: bool = False
+
+    sliding_window: int = 0  # Sliding window size for context compression
+
 
     def build_ctx(self) -> dict:
         return {
@@ -646,9 +647,9 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
             media_resolution="MEDIA_RESOLUTION_MEDIUM",
             context_window_compression=(
                 types.ContextWindowCompressionConfig(
-                    trigger_tokens=12800,
-                    sliding_window=types.SlidingWindow(target_tokens=12800),
-                )
+                    trigger_tokens=self.config.sliding_window,
+                    sliding_window=types.SlidingWindow(target_tokens=self.config.sliding_window),
+                ) if self.config.sliding_window != 0 else None
             ),
             realtime_input_config=RealtimeInputConfig(
                 automatic_activity_detection=AutomaticActivityDetection(
