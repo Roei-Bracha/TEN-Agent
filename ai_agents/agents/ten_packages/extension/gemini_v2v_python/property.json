@@ -1,7 +1,7 @@
 {
     "api_key": "${env:GEMINI_API_KEY}",
     "temperature": 0.9,
-    "model": "models/gemini-live-2.5-flash-preview",
+    "model": "models/gemini-2.5-flash-preview-native-audio-dialog",
     "max_tokens": 2048,
     "voice": "Puck",
     "language": "en-US",
@@ -9,5 +9,5 @@
     "transcribe_user": false,
     "transcribe_agent": true,
     "affective_dialog": false,
-    "proactive_audio": false
+    "proactive_audio": true
 }
