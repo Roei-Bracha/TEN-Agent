@@ -393,19 +393,11 @@ void ten_log_set_output_to_stderr(ten_log_t *self) {
 
   ten_log_formatter_on_format_func_t formatter_func = NULL;
 
-  // Check for LOG_JSON environment variable first
-  // NOLINTNEXTLINE(concurrency-mt-unsafe)
-  const char *log_json_env = getenv("LOG_JSON");
-  if (log_json_env && (strcmp(log_json_env, "true") == 0 || strcmp(log_json_env, "1") == 0)) {
-    formatter_func = ten_log_json_formatter;
-  } else {
-    // Use default behavior
 #if defined(OS_LINUX) || defined(OS_MACOS)
   formatter_func = ten_log_plain_colored_formatter;
 #else
   formatter_func = ten_log_plain_formatter;
 #endif
-  }
 
   // The default formatter for `stderr` can be overridden using the below
   // environment variable.
