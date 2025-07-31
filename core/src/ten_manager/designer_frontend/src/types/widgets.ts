@@ -8,9 +8,9 @@
 import type { editor as MonacoEditor } from "monaco-editor";
 import { z } from "zod";
 import type { EDocLinkKey } from "@/types/doc";
-import type { IListTenCloudStorePackage } from "@/types/extension";
+import type { ETenPackageType } from "@/types/extension";
 import type { TCustomNode } from "@/types/flow";
-import type { EConnectionType, EGraphActions } from "@/types/graphs";
+import type { EConnectionType, EGraphActions, IGraph } from "@/types/graphs";
 
 export enum EWidgetDisplayType {
   Popup = "popup",
@@ -125,6 +125,7 @@ export interface ICustomConnectionWidgetData {
     source?: boolean;
     target?: boolean;
   };
+  graph: IGraph;
 }
 
 export interface ICustomConnectionWidget
@@ -135,8 +136,8 @@ export interface ICustomConnectionWidget
 // 4. Graph Widget
 export interface IGraphWidgetData {
   type: EGraphActions;
-  base_dir: string;
-  graph_id?: string;
+  base_dir?: string;
+  graph_id: string;
   app_uri?: string | null;
   node?: TCustomNode;
   src_node?: TCustomNode;
@@ -200,7 +201,7 @@ export interface ILogViewerWidget
 
 // 6. Default Widget
 export enum EDefaultWidgetType {
-  GraphSelect = "graph_select",
+  // GraphSelect = "graph_select",
   About = "about",
   AppFolder = "app_folder",
   AppsManager = "apps_manager",
@@ -227,7 +228,7 @@ export interface IDefaultWidget extends IWidgetBase<IDefaultWidgetData> {
 // 7. Extension Widget
 export interface IExtensionWidgetData {
   name: string;
-  versions: IListTenCloudStorePackage[];
+  type: ETenPackageType;
 }
 
 export interface IExtensionWidget extends IWidgetBase<IExtensionWidgetData> {

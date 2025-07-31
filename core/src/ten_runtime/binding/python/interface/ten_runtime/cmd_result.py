@@ -4,12 +4,17 @@
 # Licensed under the Apache License, Version 2.0, with certain conditions.
 # Refer to the "LICENSE" file in the root directory for more information.
 #
-from typing import Type, TypeVar
+from typing import TypeVar, cast
 from enum import IntEnum
 
-from libten_runtime_python import _CmdResult
+from libten_runtime_python import (
+    _CmdResult,  # pyright: ignore[reportPrivateUsage]
+    _Cmd,  # pyright: ignore[reportPrivateUsage]
+    _ten_py_cmd_result_register_cmd_result_type,  # pyright: ignore[reportPrivateUsage] # noqa: E501
+)
 
 from .cmd import Cmd
+from .msg import Msg
 
 T = TypeVar("T", bound="CmdResult")
 
@@ -24,28 +29,28 @@ class StatusCode(IntEnum):
     ERROR = 1
 
 
-class CmdResult(_CmdResult):
-    def __init__(self):
+class CmdResult(_CmdResult, Msg):
+    def __init__(  # pyright: ignore[reportMissingSuperCall]
+        self, status_code: int, target_cmd: _Cmd
+    ):
         raise NotImplementedError("Use CmdResult.create instead.")
 
     @classmethod
-    def create(cls: Type[T], status_code: StatusCode, target_cmd: Cmd) -> T:
-        return cls.__new__(cls, status_code, target_cmd)
+    def create(cls: type[T], status_code: StatusCode, target_cmd: Cmd) -> T:
+        return cast(T, cls.__new__(cls, status_code, target_cmd))
 
-    def clone(self) -> "CmdResult":
-        return _CmdResult.clone(self)  # type: ignore
+    def clone(self) -> "CmdResult":  # pyright: ignore[reportImplicitOverride]
+        return cast("CmdResult", _CmdResult.clone(self))
 
-    def get_status_code(self) -> StatusCode:
+    def get_status_code(  # pyright: ignore[reportImplicitOverride]
+        self,
+    ) -> StatusCode:
         return StatusCode(_CmdResult.get_status_code(self))
 
-    def set_final(self, is_final: bool):
-        if is_final:
-            return _CmdResult.set_final(self, 1)
-        else:
-            return _CmdResult.set_final(self, 0)
+    def set_final(  # pyright: ignore[reportImplicitOverride]
+        self, is_final: bool
+    ):
+        return _CmdResult.set_final(self, is_final)
 
-    def is_final(self) -> bool:
-        return _CmdResult.is_final(self)
 
-    def is_completed(self) -> bool:
-        return _CmdResult.is_completed(self)
+_ten_py_cmd_result_register_cmd_result_type(CmdResult)

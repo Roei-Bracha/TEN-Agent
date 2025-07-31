@@ -260,6 +260,8 @@
     "openAGraphToInstall": "拡張機能をインストールするにはグラフを開いてください",
     "noMatchResult": "一致する結果がありません",
     "matchResult": "{{count}}件の一致する結果",
+    "noExtensions": "拡張機能が見つかりません",
+    "tryAdjusting": "検索条件やフィルターを調整してみてください",
     "install": "インストール",
     "installed": "インストール済み",
     "filter": {
@@ -271,7 +273,7 @@
       "sort-name-desc": "名前（降順）",
       "type": "タイプ"
     },
-    "extensionTitle": "拡張機能: {{name}}",
+    "extensionTitle": "{{type}}: {{name}}",
     "os-arch": "OS/アーキテクチャ",
     "selectOsArch": "OS/アーキテクチャを選択",
     "os-arch-default": "デフォルト",
@@ -282,7 +284,16 @@
     "versionLatest": "最新",
     "localAddonTip": "(ローカル)",
     "tags": "タグ",
-    "identifier": "識別"
+    "identifier": "識別",
+    "packageType": {
+      "all": "すべて",
+      "invalid": "無効",
+      "system": "システム",
+      "app": "アプリ",
+      "extension": "拡張機能",
+      "protocol": "プロトコル",
+      "addonLoader": "アドオンローダー"
+    }
   },
   "rtcInteraction": {
     "title": "リアルタイム音声AIエージェント"
@@ -339,6 +350,27 @@
     },
     "messageList": {
       "noMessages": "メッセージがありません"
+    },
+    "node": {
+      "uninstalled": "未インストール",
+      "installed": "インストール済み",
+      "extension": {
+        "title": "拡張ノード",
+        "tag": "拡張機能"
+      }
+    },
+    "graph": {
+      "title": "グラフ",
+      "selected-sum-count": "{{sum}}個中{{count}}個を選択",
+      "select-all": "すべて選択",
+      "select-only": "のみ",
+      "auto-start": "自動開始",
+      "auto-start-enabled": "自動開始が有効",
+      "auto-start-disabled": "自動開始が無効",
+      "enable-auto-start": "自動開始を有効にする",
+      "disable-auto-start": "自動開始を無効にする",
+      "change-auto-start-success": "自動開始設定の更新に成功しました",
+      "change-auto-start-failed": "自動開始設定の更新に失敗しました"
     }
   }
 }

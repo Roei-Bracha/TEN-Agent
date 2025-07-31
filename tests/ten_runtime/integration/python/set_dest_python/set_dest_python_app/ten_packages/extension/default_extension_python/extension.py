@@ -4,7 +4,6 @@
 # Licensed under the Apache License, Version 2.0, with certain conditions.
 # Refer to the "LICENSE" file in the root directory for more information.
 #
-from typing import Optional
 from ten_runtime import (
     Extension,
     TenEnv,
@@ -13,6 +12,7 @@ from ten_runtime import (
     CmdResult,
     TenError,
     LogLevel,
+    Loc,
 )
 
 
@@ -53,8 +53,8 @@ class DefaultExtension(Extension):
     def check_hello(
         self,
         ten_env: TenEnv,
-        result: Optional[CmdResult],
-        error: Optional[TenError],
+        result: CmdResult | None,
+        error: TenError | None,
         receivedCmd: Cmd,
     ):
         if error is not None:
@@ -82,7 +82,13 @@ class DefaultExtension(Extension):
         ten_env.log(LogLevel.INFO, "on_cmd json: " + cmd_json)
 
         new_cmd = Cmd.create("hello")
-        new_cmd.set_dest(None, None, "simple_echo_cpp")
+
+        err = new_cmd.set_dests([Loc(None, "", "simple_echo_cpp")])
+        assert err is not None, "should be error"
+
+        err = new_cmd.set_dests([Loc("", "", "simple_echo_cpp")])
+        assert err is None, "should be success"
+
         new_cmd.set_property_from_json("test", '"testValue2"')
         test_value, _ = new_cmd.get_property_to_json("test")
         ten_env.log(LogLevel.INFO, "on_cmd test_value: " + test_value)

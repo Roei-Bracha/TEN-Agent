@@ -16,9 +16,11 @@
 #include "ten_utils/macro/check.h"
 #include "ten_utils/macro/mark.h"
 
+static PyTypeObject *ten_py_data_type = NULL;
+
 static ten_py_data_t *ten_py_data_create_internal(PyTypeObject *py_type) {
   if (!py_type) {
-    py_type = ten_py_data_py_type();
+    py_type = ten_py_data_type;
   }
 
   ten_py_data_t *py_data = (ten_py_data_t *)py_type->tp_alloc(py_type, 0);
@@ -79,7 +81,7 @@ PyObject *ten_py_data_alloc_buf(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_data_lock_buf(PyObject *self, PyObject *args) {
+PyObject *ten_py_data_lock_buf(PyObject *self, TEN_UNUSED PyObject *args) {
   ten_py_data_t *py_data = (ten_py_data_t *)self;
   TEN_ASSERT(py_data && ten_py_msg_check_integrity((ten_py_msg_t *)py_data),
              "Invalid argument.");
@@ -132,7 +134,7 @@ PyObject *ten_py_data_unlock_buf(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_data_get_buf(PyObject *self, PyObject *args) {
+PyObject *ten_py_data_get_buf(PyObject *self, TEN_UNUSED PyObject *args) {
   ten_py_data_t *py_data = (ten_py_data_t *)self;
   TEN_ASSERT(py_data && ten_py_msg_check_integrity((ten_py_msg_t *)py_data),
              "Invalid argument.");
@@ -147,11 +149,18 @@ PyObject *ten_py_data_get_buf(PyObject *self, PyObject *args) {
 
   size_t data_size = buf->size;
 
-  return PyByteArray_FromStringAndSize((const char *)buf->data, data_size);
+  // Check for overflow when converting size_t to Py_ssize_t
+  if (data_size > PY_SSIZE_T_MAX) {
+    return ten_py_raise_py_value_error_exception("Buffer size too large.");
+  }
+
+  return PyByteArray_FromStringAndSize((const char *)buf->data,
+                                       (Py_ssize_t)data_size);
 }
 
 ten_py_data_t *ten_py_data_wrap(ten_shared_ptr_t *data) {
-  TEN_ASSERT(data && ten_msg_check_integrity(data), "Invalid argument.");
+  TEN_ASSERT(data, "Invalid argument.");
+  TEN_ASSERT(ten_msg_check_integrity(data), "Invalid argument.");
 
   ten_py_data_t *py_data = ten_py_data_create_internal(NULL);
   py_data->msg.c_msg = ten_shared_ptr_clone(data);
@@ -163,7 +172,7 @@ void ten_py_data_invalidate(ten_py_data_t *self) {
   Py_DECREF(self);
 }
 
-PyObject *ten_py_data_clone(PyObject *self, PyObject *args) {
+PyObject *ten_py_data_clone(PyObject *self, TEN_UNUSED PyObject *args) {
   ten_py_data_t *py_data = (ten_py_data_t *)self;
   TEN_ASSERT(py_data && ten_py_msg_check_integrity((ten_py_msg_t *)py_data),
              "Invalid argument.");
@@ -172,7 +181,8 @@ PyObject *ten_py_data_clone(PyObject *self, PyObject *args) {
   ten_shared_ptr_t *cloned_msg = ten_msg_clone(py_data->msg.c_msg, NULL);
   TEN_ASSERT(cloned_msg, "Should not happen.");
 
-  ten_py_data_t *cloned_py_data = ten_py_data_create_internal(NULL);
+  PyTypeObject *actual_type = Py_TYPE(self);
+  ten_py_data_t *cloned_py_data = ten_py_data_create_internal(actual_type);
   cloned_py_data->msg.c_msg = cloned_msg;
   return (PyObject *)cloned_py_data;
 }
@@ -194,4 +204,19 @@ bool ten_py_data_init_for_module(PyObject *module) {
     return false;
   }
   return true;
+}
+
+PyObject *ten_py_data_register_data_type(TEN_UNUSED PyObject *self,
+                                         PyObject *args) {
+  PyObject *cls = NULL;
+  if (!PyArg_ParseTuple(args, "O!", &PyType_Type, &cls)) {
+    return NULL;
+  }
+
+  Py_XINCREF(cls);
+  Py_XDECREF(ten_py_data_type);
+
+  ten_py_data_type = (PyTypeObject *)cls;
+
+  Py_RETURN_NONE;
 }

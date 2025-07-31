@@ -14,10 +14,12 @@
 #include "ten_utils/macro/check.h"
 #include "ten_utils/macro/mark.h"
 
+static PyTypeObject *ten_py_video_frame_type = NULL;
+
 static ten_py_video_frame_t *ten_py_video_frame_create_internal(
     PyTypeObject *py_type) {
   if (!py_type) {
-    py_type = ten_py_video_frame_py_type();
+    py_type = ten_py_video_frame_type;
   }
 
   ten_py_video_frame_t *py_video_frame =
@@ -64,8 +66,8 @@ void ten_py_video_frame_destroy(PyObject *self) {
 }
 
 ten_py_video_frame_t *ten_py_video_frame_wrap(ten_shared_ptr_t *video_frame) {
-  TEN_ASSERT(video_frame && ten_msg_check_integrity(video_frame),
-             "Invalid argument.");
+  TEN_ASSERT(video_frame, "Invalid argument.");
+  TEN_ASSERT(ten_msg_check_integrity(video_frame), "Invalid argument.");
 
   ten_py_video_frame_t *py_video_frame =
       ten_py_video_frame_create_internal(NULL);
@@ -100,7 +102,8 @@ PyObject *ten_py_video_frame_alloc_buf(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_video_frame_lock_buf(PyObject *self, PyObject *args) {
+PyObject *ten_py_video_frame_lock_buf(PyObject *self,
+                                      TEN_UNUSED PyObject *args) {
   ten_py_video_frame_t *py_video_frame = (ten_py_video_frame_t *)self;
   TEN_ASSERT(py_video_frame &&
                  ten_py_msg_check_integrity((ten_py_msg_t *)py_video_frame),
@@ -159,7 +162,8 @@ PyObject *ten_py_video_frame_unlock_buf(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_video_frame_get_buf(PyObject *self, PyObject *args) {
+PyObject *ten_py_video_frame_get_buf(PyObject *self,
+                                     TEN_UNUSED PyObject *args) {
   ten_py_video_frame_t *py_video_frame = (ten_py_video_frame_t *)self;
   TEN_ASSERT(py_video_frame &&
                  ten_py_msg_check_integrity((ten_py_msg_t *)py_video_frame),
@@ -180,7 +184,8 @@ PyObject *ten_py_video_frame_get_buf(PyObject *self, PyObject *args) {
                                        (Py_ssize_t)data_size);
 }
 
-PyObject *ten_py_video_frame_get_width(PyObject *self, PyObject *args) {
+PyObject *ten_py_video_frame_get_width(PyObject *self,
+                                       TEN_UNUSED PyObject *args) {
   ten_py_video_frame_t *py_video_frame = (ten_py_video_frame_t *)self;
   TEN_ASSERT(py_video_frame &&
                  ten_py_msg_check_integrity((ten_py_msg_t *)py_video_frame),
@@ -205,7 +210,8 @@ PyObject *ten_py_video_frame_set_width(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_video_frame_get_height(PyObject *self, PyObject *args) {
+PyObject *ten_py_video_frame_get_height(PyObject *self,
+                                        TEN_UNUSED PyObject *args) {
   ten_py_video_frame_t *py_video_frame = (ten_py_video_frame_t *)self;
   TEN_ASSERT(py_video_frame &&
                  ten_py_msg_check_integrity((ten_py_msg_t *)py_video_frame),
@@ -230,7 +236,8 @@ PyObject *ten_py_video_frame_set_height(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_video_frame_get_timestamp(PyObject *self, PyObject *args) {
+PyObject *ten_py_video_frame_get_timestamp(PyObject *self,
+                                           TEN_UNUSED PyObject *args) {
   ten_py_video_frame_t *py_video_frame = (ten_py_video_frame_t *)self;
   TEN_ASSERT(py_video_frame &&
                  ten_py_msg_check_integrity((ten_py_msg_t *)py_video_frame),
@@ -256,7 +263,7 @@ PyObject *ten_py_video_frame_set_timestamp(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_video_frame_is_eof(PyObject *self, PyObject *args) {
+PyObject *ten_py_video_frame_is_eof(PyObject *self, TEN_UNUSED PyObject *args) {
   ten_py_video_frame_t *py_video_frame = (ten_py_video_frame_t *)self;
   TEN_ASSERT(py_video_frame &&
                  ten_py_msg_check_integrity((ten_py_msg_t *)py_video_frame),
@@ -281,7 +288,8 @@ PyObject *ten_py_video_frame_set_eof(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_video_frame_get_pixel_fmt(PyObject *self, PyObject *args) {
+PyObject *ten_py_video_frame_get_pixel_fmt(PyObject *self,
+                                           TEN_UNUSED PyObject *args) {
   ten_py_video_frame_t *py_video_frame = (ten_py_video_frame_t *)self;
   TEN_ASSERT(py_video_frame &&
                  ten_py_msg_check_integrity((ten_py_msg_t *)py_video_frame),
@@ -307,7 +315,7 @@ PyObject *ten_py_video_frame_set_pixel_fmt(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
-PyObject *ten_py_video_frame_clone(PyObject *self, PyObject *args) {
+PyObject *ten_py_video_frame_clone(PyObject *self, TEN_UNUSED PyObject *args) {
   ten_py_video_frame_t *py_video_frame = (ten_py_video_frame_t *)self;
   TEN_ASSERT(py_video_frame &&
                  ten_py_msg_check_integrity((ten_py_msg_t *)py_video_frame),
@@ -317,8 +325,9 @@ PyObject *ten_py_video_frame_clone(PyObject *self, PyObject *args) {
   ten_shared_ptr_t *cloned_msg = ten_msg_clone(py_video_frame->msg.c_msg, NULL);
   TEN_ASSERT(cloned_msg, "Should not happen.");
 
+  PyTypeObject *actual_type = Py_TYPE(self);
   ten_py_video_frame_t *cloned_py_video_frame =
-      ten_py_video_frame_create_internal(NULL);
+      ten_py_video_frame_create_internal(actual_type);
   cloned_py_video_frame->msg.c_msg = cloned_msg;
   return (PyObject *)cloned_py_video_frame;
 }
@@ -341,4 +350,19 @@ bool ten_py_video_frame_init_for_module(PyObject *module) {
     return false;
   }
   return true;
+}
+
+PyObject *ten_py_video_frame_register_video_frame_type(
+    TEN_UNUSED PyObject *self, PyObject *args) {
+  PyObject *cls = NULL;
+  if (!PyArg_ParseTuple(args, "O!", &PyType_Type, &cls)) {
+    return NULL;
+  }
+
+  Py_XINCREF(cls);
+  Py_XDECREF(ten_py_video_frame_type);
+
+  ten_py_video_frame_type = (PyTypeObject *)cls;
+
+  Py_RETURN_NONE;
 }

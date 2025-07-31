@@ -260,6 +260,8 @@
     "openAGraphToInstall": "開啟圖譜以安裝擴充套件",
     "noMatchResult": "無符合結果",
     "matchResult": "找到 {{count}} 個符合結果",
+    "noExtensions": "未找到擴充套件",
+    "tryAdjusting": "嘗試調整您的搜尋或篩選條件",
     "install": "安裝",
     "installed": "已安裝",
     "filter": {
@@ -271,7 +273,7 @@
       "sort-name-desc": "名稱（降序）",
       "type": "類型"
     },
-    "extensionTitle": "擴充套件: {{name}}",
+    "extensionTitle": "{{type}}: {{name}}",
     "os-arch": "作業系統/架構",
     "selectOsArch": "選擇作業系統/架構",
     "os-arch-default": "預設",
@@ -282,7 +284,16 @@
     "versionLatest": "最新",
     "localAddonTip": "(本地)",
     "tags": "標籤",
-    "identifier": "識別碼"
+    "identifier": "識別碼",
+    "packageType": {
+      "all": "全部",
+      "invalid": "無效",
+      "system": "系統",
+      "app": "應用程式",
+      "extension": "擴充功能",
+      "protocol": "協定",
+      "addonLoader": "附加元件載入器"
+    }
   },
   "rtcInteraction": {
     "title": "實時語音 AI 代理"
@@ -339,6 +350,27 @@
     },
     "messageList": {
       "noMessages": "無訊息"
+    },
+    "node": {
+      "uninstalled": "未安裝",
+      "installed": "已安裝",
+      "extension": {
+        "title": "擴充功能節點",
+        "tag": "擴充功能"
+      }
+    },
+    "graph": {
+      "title": "圖譜",
+      "selected-sum-count": "已選擇 {{count}} / {{sum}} 個",
+      "select-all": "全選",
+      "select-only": "僅選擇",
+      "auto-start": "自動啟動",
+      "auto-start-enabled": "自動啟動已啟用",
+      "auto-start-disabled": "自動啟動已停用",
+      "enable-auto-start": "啟用自動啟動",
+      "disable-auto-start": "停用自動啟動",
+      "change-auto-start-success": "自動啟動設定更新成功",
+      "change-auto-start-failed": "自動啟動設定更新失敗"
     }
   }
 }
