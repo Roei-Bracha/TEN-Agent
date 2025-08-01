@@ -981,13 +981,9 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                     self.transcript, content
                 )
                 for s in sentences:
-                    asyncio.create_task(
                         send_data(self.ten_env, s, stream_id, role, is_final)
-                    )
             else:
-                asyncio.create_task(
-                    send_data(self.ten_env, content, stream_id, role, is_final)
-                )
+                send_data(self.ten_env, content, stream_id, role, is_final)
         except Exception as e:
             self.ten_env.log_error(
                 f"Error send text data {role}: {content} {is_final} {e}"

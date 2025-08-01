@@ -133,18 +133,17 @@ class textWebhookExtension(AsyncExtension):
 
             # Add additional data from the original message if available
             try:
-                for prop_name in data.get_property_names():
-                    if prop_name not in payload and prop_name not in [
-                        TEXT_DATA_TEXT_FIELD,
-                        TEXT_DATA_FINAL_FIELD,
-                        TEXT_DATA_STREAM_ID_FIELD,
-                        TEXT_DATA_END_OF_SEGMENT_FIELD,
-                    ]:
-                        try:
-                            prop_value = data.get_property_string(prop_name)
+                json_str, _ = data.get_property_to_json(None)
+                if json_str:
+                    all_properties = json.loads(json_str)
+                    for prop_name, prop_value in all_properties.items():
+                        if prop_name not in payload and prop_name not in [
+                            TEXT_DATA_TEXT_FIELD,
+                            TEXT_DATA_FINAL_FIELD,
+                            TEXT_DATA_STREAM_ID_FIELD,
+                            TEXT_DATA_END_OF_SEGMENT_FIELD,
+                        ]:
                             payload[f"original_{prop_name}"] = prop_value
-                        except Exception:
-                            pass
             except Exception as e:
                 ten_env.log_warn(
                     f"Could not extract additional properties: {e}"
@@ -612,8 +611,8 @@ class textWebhookExtension(AsyncExtension):
         # Direct forward mode for message collector compatibility
         if self.config.direct_forward and data_name == "data":
             try:
-                raw_data = data.get_property_buf("data")
-                if raw_data:
+                raw_data, ten_error = data.get_property_buf("data")
+                if raw_data and len(raw_data) > 0 and ten_error is None:
                     decoded_data = raw_data.decode("utf-8", errors="replace")
                     # decode_data is in base64 format
                     decoded_data = base64.b64decode(raw_data).decode(
@@ -715,7 +714,7 @@ class textWebhookExtension(AsyncExtension):
             if data_name == "data":
                 try:
                     # This is likely from message collector
-                    raw_data = data.get_property_buf("data")
+                    raw_data, ten_error = data.get_property_buf("data")
                     if raw_data:
                         decoded_data = raw_data.decode(
                             "utf-8", errors="replace"
@@ -816,7 +815,7 @@ class textWebhookExtension(AsyncExtension):
                     # Try to extract text from raw data if available and we haven't already tried
                     try:
                         if data_name != "data":
-                            raw_data = data.get_property_buf("data")
+                            raw_data, ten_error = data.get_property_buf("data")
                             if raw_data:
                                 text = raw_data.decode(
                                     "utf-8", errors="replace"
