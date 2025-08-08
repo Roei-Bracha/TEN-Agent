@@ -17,7 +17,7 @@ from ten_runtime import (
 
 from ten_ai_base.config import BaseConfig
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, cast
 import json
 import asyncio
 import aiohttp
@@ -390,12 +390,8 @@ class textWebhookExtension(AsyncExtension):
             )
             return False
 
-        # Create a new session if needed
-        if not self.session:
-            ten_env.log_info(
-                "HTTP session not initialized, creating new session"
-            )
-            self.session = aiohttp.ClientSession()
+        # Use a dedicated short-lived session for user events to avoid shutdown races
+        temp_session = aiohttp.ClientSession()
 
         try:
             # Generate a unique message ID
@@ -424,7 +420,7 @@ class textWebhookExtension(AsyncExtension):
             ten_env.log_info(
                 f"Sending user {event_type} message to {self.config.url}"
             )
-            async with self.session.request(
+            async with temp_session.request(
                 method=self.config.method,
                 url=self.config.url,
                 json=payload,
@@ -455,6 +451,11 @@ class textWebhookExtension(AsyncExtension):
             )
             traceback.print_exc()
             return False
+        finally:
+            try:
+                await temp_session.close()
+            except Exception:
+                pass
 
     async def _ensure_conversation_end_sent(self, ten_env: AsyncTenEnv) -> None:
         """
@@ -608,24 +609,55 @@ class textWebhookExtension(AsyncExtension):
         data_name = data.get_name()
         ten_env.log_info(f"on_data received: name={data_name}")
 
+        # Ensure configuration is initialized
+        if self.config is None:
+            ten_env.log_warn("text_webhook config not initialized; dropping data event")
+            return
+
         # Direct forward mode for message collector compatibility
         if self.config.direct_forward and data_name == "data":
             try:
                 raw_data, ten_error = data.get_property_buf("data")
                 if raw_data and len(raw_data) > 0 and ten_error is None:
+                    # In direct forward mode, DO NOT try to base64 or JSON decode the whole buffer.
+                    # Message collector usually sends: message_id|part_index|total_parts|<base64(json or text)>
                     decoded_data = raw_data.decode("utf-8", errors="replace")
-                    # decode_data is in base64 format
-                    decoded_data = base64.b64decode(raw_data).decode(
-                        "utf-8", errors="replace"
-                    )
-                    json_data = json.loads(decoded_data)
+                    forward_text = decoded_data
+
+                    # Best-effort: if buffer looks like MC format, extract the content part safely.
+                    try:
+                        if "|" in decoded_data:
+                            parts = decoded_data.split("|", 3)
+                            if len(parts) >= 4:
+                                b64_content = parts[3]
+                                try:
+                                    # Try base64 decode just the content field; if it fails, fall back to raw
+                                    content_bytes = base64.b64decode(b64_content + "==")
+                                    content_text = content_bytes.decode(
+                                        "utf-8", errors="replace"
+                                    )
+                                    # If content is JSON with a "text" field, forward that, else the content itself
+                                    try:
+                                        parsed = json.loads(content_text)
+                                        if isinstance(parsed, dict) and "text" in parsed:
+                                            forward_text = parsed["text"]
+                                        else:
+                                            forward_text = content_text
+                                    except Exception:
+                                        forward_text = content_text
+                                except Exception:
+                                    # Not valid base64 – keep original decoded_data
+                                    pass
+                    except Exception as e2:
+                        ten_env.log_warn(f"Direct forward: content extraction hint failed: {e2}")
+
                     ten_env.log_info(
-                        f"Direct forward mode: Sending raw data as text: '{decoded_data}'"
+                        f"Direct forward mode: Forwarding text: '{forward_text}'"
                     )
 
                     # Create a simple direct forward payload
                     payload = {
-                        "text": decoded_data,
+                        "text": forward_text,
                         "is_final": True,
                         "message_id": str(uuid.uuid4())[:8],
                         "conversation_id": self.conversation_id,
@@ -640,7 +672,8 @@ class textWebhookExtension(AsyncExtension):
                     headers = self.config.build_parsed_headers()
 
                     ten_env.log_info(f"Direct forwarding to {self.config.url}")
-                    async with self.session.request(
+                    session = cast(aiohttp.ClientSession, self.session)
+                    async with session.request(
                         method=self.config.method,
                         url=self.config.url,
                         json=payload,
@@ -806,7 +839,15 @@ class textWebhookExtension(AsyncExtension):
             # Fall back to standard text processing if message collector handling didn't work
             if not text:
                 try:
-                    text = data.get_property_string(TEXT_DATA_TEXT_FIELD)
+                    tmp_val = data.get_property_string(TEXT_DATA_TEXT_FIELD)
+                    if isinstance(tmp_val, tuple):
+                        text_val, text_err = tmp_val
+                        if text_err is None:
+                            text = text_val
+                        else:
+                            raise Exception(str(text_err))
+                    else:
+                        text = tmp_val
                     ten_env.log_info(f"Found text: '{text}'")
                 except Exception:
                     ten_env.log_warn(
@@ -815,8 +856,14 @@ class textWebhookExtension(AsyncExtension):
                     # Try to extract text from raw data if available and we haven't already tried
                     try:
                         if data_name != "data":
-                            raw_data, ten_error = data.get_property_buf("data")
-                            if raw_data:
+                            raw_or_tuple = data.get_property_buf("data")
+                            # Support both (buf, err) and raw bytes
+                            if isinstance(raw_or_tuple, tuple):
+                                raw_data, ten_error = raw_or_tuple
+                            else:
+                                raw_data, ten_error = raw_or_tuple, None
+
+                            if raw_data and ten_error is None:
                                 text = raw_data.decode(
                                     "utf-8", errors="replace"
                                 )
@@ -832,19 +879,34 @@ class textWebhookExtension(AsyncExtension):
             stream_id = 0
 
             try:
-                is_final = data.get_property_bool(TEXT_DATA_FINAL_FIELD)
+                tmp_final = data.get_property_bool(TEXT_DATA_FINAL_FIELD)
+                if isinstance(tmp_final, tuple):
+                    is_final_val, final_err = tmp_final
+                    is_final = is_final_val if final_err is None else True
+                else:
+                    is_final = tmp_final
             except Exception as e:
                 ten_env.log_warn(f"Error getting is_final property: {e}")
 
             try:
-                end_of_segment = data.get_property_bool(
+                tmp_eos = data.get_property_bool(
                     TEXT_DATA_END_OF_SEGMENT_FIELD
                 )
+                if isinstance(tmp_eos, tuple):
+                    eos_val, eos_err = tmp_eos
+                    end_of_segment = eos_val if eos_err is None else False
+                else:
+                    end_of_segment = tmp_eos
             except Exception as e:
                 ten_env.log_warn(f"Error getting end_of_segment property: {e}")
 
             try:
-                stream_id = data.get_property_int(TEXT_DATA_STREAM_ID_FIELD)
+                tmp_sid = data.get_property_int(TEXT_DATA_STREAM_ID_FIELD)
+                if isinstance(tmp_sid, tuple):
+                    sid_val, sid_err = tmp_sid
+                    stream_id = sid_val if sid_err is None else 0
+                else:
+                    stream_id = tmp_sid
             except Exception as e:
                 ten_env.log_warn(f"Error getting stream_id property: {e}")
 
