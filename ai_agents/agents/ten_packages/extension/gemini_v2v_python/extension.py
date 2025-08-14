@@ -151,7 +151,7 @@ class GeminiRealtimeConfig(BaseConfig):
     base_uri: str = ""
     api_key: str = ""
     api_version: str = ""
-    model: str = "models/gemini-2.5-flash-preview-native-audio-dialog"
+    model: str = "gemini-2.5-flash-preview-native-audio-dialog"
     language: str = "en-US"
     prompt: str = ""
     temperature: float = 0.5
@@ -165,7 +165,7 @@ class GeminiRealtimeConfig(BaseConfig):
     dump: bool = False
     greeting: str = "hello"
     # Audio optimization settings
-    audio_buffer_threshold: int = 1024
+    audio_chunk_size: int = 1024
     # Transcription settings
     transcribe_agent: bool = False
     transcribe_user: bool = False
@@ -203,7 +203,7 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         self.stream_id: int = 0
         self.remote_stream_id: int = 0
         self.channel_name: str = ""
-        self.audio_len_threshold: int = 1024  # Will be updated from config
+        self.audio_len_threshold: int = 5120
 
         self.completion_times = []
         self.connect_times = []
@@ -218,12 +218,9 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         self.leftover_bytes = b""
         self.video_task = None
         self.image_queue = asyncio.Queue(maxsize=5)
-        self.audio_queue = asyncio.Queue(maxsize=10)
         self.video_buff: str = ""
         self.loop = None
         self.ten_env = None
-        self.last_audio_time = time.time()  # Track last audio received
-        self.tasks = []
 
         # Cache for session configuration to reduce cold start time
         self._cached_session_config = None
@@ -242,9 +239,6 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         self.config = await GeminiRealtimeConfig.create_async(ten_env=ten_env)
         ten_env.log_info(f"config: {self.config}")
 
-        # Update audio threshold from config
-        self.audio_len_threshold = self.config.audio_buffer_threshold
-
         if not self.config.api_key:
             ten_env.log_error("api_key is required")
             return
@@ -257,239 +251,98 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                 api_key=self.config.api_key,
                 http_options={"api_version": "v1alpha"},
             )
+            self.loop.create_task(self._loop(ten_env))
+            self.loop.create_task(self._on_video(ten_env))
 
-            self.tasks = []
-            self.tasks.append(
-                self.loop.create_task(self._connection_manager(ten_env))
-            )
-            self.tasks.append(self.loop.create_task(self._on_video(ten_env)))
-            self.tasks.append(
-                self.loop.create_task(self._process_audio_queue(ten_env))
-            )
-
+            # self.loop.create_task(self._loop())
         except Exception as e:
             traceback.print_exc()
             self.ten_env.log_error(f"Failed to init client {e}")
 
-    async def _connection_manager(self, ten_env: AsyncTenEnv) -> None:
-        """Manage connection with retries and proper error handling."""
-        retry_count = 0
-        max_retries = 5
-        base_retry_delay = 1.0  # seconds
-
+    async def _loop(self, ten_env: AsyncTenEnv) -> None:
         while not self.stopped:
+            await asyncio.sleep(1)
             try:
-                # If we've hit max retries, wait longer before trying again
-                if retry_count >= max_retries:
-                    ten_env.log_warn(
-                        f"Hit max retries ({max_retries}), waiting before reconnecting"
-                    )
-                    await asyncio.sleep(10)  # Longer delay after max retries
-                    retry_count = 0
+                config: LiveConnectConfig = self._get_session_config()
+                ten_env.log_info(f"Start listen: {self.config.model}")
+                async with self.client.aio.live.connect(
+                    model=self.config.model, config=config
+                ) as session:
+                    ten_env.log_info("Connected")
+                    session = cast(AsyncSession, session)
+                    self.session = session
+                    self.connected = True
 
-                # Log connection attempt
-                ten_env.log_info("Attempting to connect to Gemini...")
-
-                # Connect and run the session
-                await self._run_session(ten_env)
-
-                # If _run_session exits normally, reset retry count
-                retry_count = 0
-
-            except Exception as e:
-                retry_count += 1
-                retry_delay = min(
-                    60, base_retry_delay * (2**retry_count)
-                )  # Exponential backoff
-
-                traceback.print_exc()
-                ten_env.log_error(
-                    f"Connection error: {e}, retrying in {retry_delay} seconds"
-                )
-
-                # Close existing session if needed
-                if self.session:
-                    try:
-                        await self.session.close()
-                    except:
-                        pass
-                    self.session = None
-
-                # Wait before retrying
-                await asyncio.sleep(retry_delay)
-
-                # Reset connection state
-                self.connected = False
-
-    async def _run_session(self, ten_env: AsyncTenEnv) -> None:
-        """Run a session with optimized task handling."""
-        connect_start_time = time.time()
-
-        try:
-            # Ensure client is initialized
-            if not self.client:
-                ten_env.log_error("Client not initialized, cannot connect")
-                return
-
-            # Get session configuration
-            config = self._get_session_config()
-
-            ten_env.log_info("Starting connection to Gemini service...")
-
-            # Connect to session
-            async with self.client.aio.live.connect(
-                model=self.config.model, config=config
-            ) as session:
-                # Record connection time and setup session
-                self.connect_times.append(time.time() - connect_start_time)
-                session = cast(AsyncSession, session)
-                self.session = session
-                self.connected = True
-                ten_env.log_info("Connected successfully")
-
-                # Send greeting if needed
-                if self.users_count > 0:
                     await self._greeting()
 
-                # Create tasks for receiving responses
-                response_task = asyncio.create_task(
-                    self._receive_responses(ten_env)
-                )
-
-                # Wait until the session is stopped
-                try:
-                    while not self.stopped:
-                        await asyncio.sleep(0.5)
-
-                except asyncio.CancelledError:
-                    ten_env.log_info("Session cancelled")
-
-                finally:
-                    # Cleanup response task
-                    if not response_task.done():
-                        response_task.cancel()
-
-                    # Wait for task to complete
-                    try:
-                        await asyncio.wait_for(response_task, timeout=2.0)
-                    except (asyncio.TimeoutError, asyncio.CancelledError):
-                        pass
-
-        except Exception as e:
-            ten_env.log_error(f"Failed to establish connection: {e}")
-            traceback.print_exc()
-
-        finally:
-            # Reset connection state
-            self.connected = False
-            self.session = None
-            ten_env.log_info("Session ended")
-
-    async def _receive_responses(self, ten_env: AsyncTenEnv) -> None:
-        """Handle incoming responses from the model."""
-        try:
-            while self.connected and self.session and not self.stopped:
-                try:
-                    # Use receive() to get server messages
-                    async for response in self.session.receive():
-                        if self.stopped:
-                            break
-
-                        # Cast to correct type
-                        response = cast(LiveServerMessage, response)
-
-                        # Process server content
-                        if response.server_content:
-                            # Handle interruption
-                            if response.server_content.interrupted:
-                                ten_env.log_info("Interrupted")
-                                await self._flush()
-                                continue
-
-                            # Process audio output (high priority)
-                            if (
-                                not response.server_content.turn_complete
-                                and response.server_content.model_turn
-                                and response.server_content.model_turn.parts
-                            ):
-
-                                # Create tasks for each audio part
-                                for (
-                                    part
-                                ) in response.server_content.model_turn.parts:
-                                    if (
-                                        part.inline_data
-                                        and part.inline_data.data
-                                    ):
-                                        # Create task for audio with high priority
-                                        asyncio.create_task(
-                                            self.send_audio_out(
-                                                ten_env,
-                                                part.inline_data.data,
-                                                sample_rate=24000,
-                                                bytes_per_sample=2,
-                                                number_of_channels=1,
-                                            )
+                    while True:
+                        try:
+                            async for response in session.receive():
+                                response = cast(LiveServerMessage, response)
+                                # ten_env.log_info(f"Received response")
+                                try:
+                                    if response.server_content:
+                                        if response.server_content.interrupted:
+                                            ten_env.log_info("Interrupted")
+                                            await self._flush()
+                                            continue
+                                        elif (
+                                            not response.server_content.turn_complete
+                                            and response.server_content.model_turn
+                                        ):
+                                            for (
+                                                part
+                                            ) in (
+                                                response.server_content.model_turn.parts
+                                            ):
+                                                if part.inline_data:
+                                                    await self.send_audio_out(
+                                                        ten_env,
+                                                        part.inline_data.data,
+                                                        sample_rate=24000,
+                                                        bytes_per_sample=2,
+                                                        number_of_channels=1,
+                                                    )
+                                        elif (
+                                            response.server_content.turn_complete
+                                        ):
+                                            ten_env.log_info("Turn complete")
+                                        self._handle_transcriptions(
+                                            response.server_content
                                         )
+                                    elif response.setup_complete:
+                                        ten_env.log_info("Setup complete")
+                                    elif response.tool_call:
+                                        func_calls = (
+                                            response.tool_call.function_calls
+                                        )
+                                        self.loop.create_task(
+                                            self._handle_tool_call(func_calls)
+                                        )
+                                except Exception:
+                                    traceback.print_exc()
+                                    ten_env.log_error(
+                                        "Failed to handle response"
+                                    )
+                            ten_env.log_info("Finish listen")
+                        except websockets.exceptions.ConnectionClosedOK:
+                            ten_env.log_info("Connection closed")
+                            break
+            except Exception as e:
+                self.ten_env.log_error(f"Failed to handle loop {e}")
 
-                            # Process transcriptions with lower priority
-                            self._handle_transcriptions(
-                                ten_env, response.server_content
-                            )
-
-                            # Handle turn completion
-                            if response.server_content.turn_complete:
-                                ten_env.log_info("Turn complete")
-
-                        # Handle setup complete
-                        elif response.setup_complete:
-                            ten_env.log_info("Setup complete")
-
-                        # Handle tool calls
-                        elif (
-                            response.tool_call
-                            and response.tool_call.function_calls
-                        ):
-                            # Create task for tool handling
-                            asyncio.create_task(
-                                self._handle_tool_call(
-                                    response.tool_call.function_calls
-                                )
-                            )
-
-                except websockets.exceptions.ConnectionClosedOK:
-                    ten_env.log_info("Connection closed normally")
-                    break
-                except websockets.exceptions.ConnectionClosedError as e:
-                    ten_env.log_warn(f"Connection closed with error: {e}")
-                    break
-                except Exception as e:
-                    ten_env.log_error(f"Error processing message: {e}")
-                    continue
-
-        except asyncio.CancelledError:
-            ten_env.log_info("Response receiver cancelled")
-        except Exception as e:
-            ten_env.log_error(f"Error in response receiver: {e}")
-            traceback.print_exc()
-
-    def _handle_transcriptions(
-        self, ten_env: AsyncTenEnv, server_content: LiveServerContent
-    ) -> None:
+    def _handle_transcriptions(self, server_content: LiveServerContent) -> None:
         """Handle transcription responses with lower priority."""
         # Process input transcription
         if (
             server_content.input_transcription
             and server_content.input_transcription.text
         ):
-            # Create task with lower priority
-            asyncio.create_task(
-                self._send_transcript(
-                    server_content.input_transcription.text,
-                    Role.User,
-                    is_final=server_content.turn_complete or False,
-                    end_of_segment=True,
-                )
+            self._send_transcript(
+                server_content.input_transcription.text,
+                Role.User,
+                is_final=server_content.turn_complete or False,
+                end_of_segment=True,
             )
 
         # Process output transcription
@@ -497,14 +350,12 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
             server_content.output_transcription
             and server_content.output_transcription.text
         ):
-            # Create task with lower priority
-            asyncio.create_task(
-                self._send_transcript(
-                    server_content.output_transcription.text,
-                    Role.Assistant,
-                    is_final=server_content.turn_complete or False,
-                    end_of_segment=True,
-                )
+
+            self._send_transcript(
+                server_content.output_transcription.text,
+                Role.Assistant,
+                is_final=server_content.turn_complete or False,
+                end_of_segment=True,
             )
 
     async def send_audio_out(
@@ -556,18 +407,8 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
         ten_env.log_info("on_stop")
 
         self.stopped = True
-
-        # Cancel all running tasks
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
-
-        # Clean up session
         if self.session:
-            try:
-                await self.session.close()
-            except:
-                pass
+            await self.session.close()
 
     async def on_audio_frame(
         self, ten_env: AsyncTenEnv, audio_frame: AudioFrame
@@ -676,88 +517,24 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
 
     # Direction: IN
     async def _on_audio(self, buff: bytearray):
-        """Queue audio input for processing without blocking."""
-        # Add audio to buffer
         self.buff += buff
-        self.last_audio_time = time.time()  # Update last audio time
-
-        # If we have enough audio data, queue it for processing
-        if len(self.buff) >= self.audio_len_threshold:
-            # Create a copy of the current buffer and clear it immediately
-            current_buff = self.buff
-            self.buff = bytearray()
-
-            # Put the audio in the queue for processing
+        # Buffer audio with optimized threshold for better performance
+        if self.connected and len(self.buff) >= self.audio_len_threshold:
             try:
-                self.audio_queue.put_nowait(current_buff)
-            except asyncio.QueueFull:
-                # If queue is full, drop oldest item and add new one
-                try:
-                    self.audio_queue.get_nowait()
-                    self.audio_queue.put_nowait(current_buff)
-                except:
-                    pass
+                # Process in larger chunks for efficiency
+                chunk_size = min(len(self.buff), self.audio_len_threshold * 2)
+                audio_data = self.buff[:chunk_size]
+                self.buff = self.buff[chunk_size:]
 
-    async def _flush_audio_buffer(self):
-        """Flush remaining audio in buffer if timeout reached."""
-        if len(self.buff) > 0:
-            current_buff = self.buff
-            self.buff = bytearray()
-            try:
-                self.audio_queue.put_nowait(current_buff)
-            except asyncio.QueueFull:
-                try:
-                    self.audio_queue.get_nowait()
-                    self.audio_queue.put_nowait(current_buff)
-                except:
-                    pass
-
-    async def _process_audio_queue(self, ten_env: AsyncTenEnv):
-        """Process queued audio data in background."""
-        while not self.stopped:
-            try:
-                # Check for timeout-based buffer flush (every 100ms)
-                current_time = time.time()
-                if (
-                    current_time - self.last_audio_time > 0.5  # 500ms timeout
-                    and len(self.buff) > 0
-                ):
-                    await self._flush_audio_buffer()
-                    ten_env.log_debug("Flushed audio buffer due to timeout")
-
-                # Wait for audio data from the queue
-                if self.audio_queue.empty():
-                    await asyncio.sleep(0.01)
-                    continue
-
-                # Get the audio data
-                current_buff = await self.audio_queue.get()
-
-                # Only process if we're connected
-                if self.connected and self.session:
-                    try:
-                        # Convert to audio blob using asyncio.to_thread to avoid blocking
-                        media_chunks = await asyncio.to_thread(
-                            lambda: types.Blob(
-                                data=current_buff,
-                                mime_type="audio/pcm;rate=16000",
-                            )
-                        )
-
-                        # Send audio data
-                        await self.session.send_realtime_input(
-                            audio=media_chunks
-                        )
-                    except Exception as e:
-                        ten_env.log_error(f"Failed to send audio: {e}")
-                else:
-                    # Log when audio is dropped due to connection issues
-                    ten_env.log_warn("Dropping audio: not connected to session")
-            except asyncio.CancelledError:
-                break
+                audio_blob = types.Blob(
+                    data=audio_data,
+                    mime_type="audio/pcm;rate=16000",
+                )
+                await self.session.send_realtime_input(audio=audio_blob)
             except Exception as e:
-                ten_env.log_error(f"Error processing audio queue: {e}")
-                await asyncio.sleep(0.1)
+                self.ten_env.log_error(f"Failed to send audio {e}")
+                # Reset buffer on error to prevent accumulation
+                self.buff = bytearray()
 
     def _get_realtime_input_config(self) -> RealtimeInputConfig:
         """Extract and return configured speech sensitivities."""
@@ -923,7 +700,7 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
             result = result.replace("{" + token + "}", value)
         return result
 
-    async def _send_transcript(
+    def _send_transcript(
         self, content: str, role: Role, is_final: bool, end_of_segment: bool
     ) -> None:
         def is_punctuation(char):
@@ -981,9 +758,13 @@ class GeminiRealtimeExtension(AsyncLLMBaseExtension):
                     self.transcript, content
                 )
                 for s in sentences:
+                    asyncio.create_task(
                         send_data(self.ten_env, s, stream_id, role, is_final)
+                    )
             else:
-                send_data(self.ten_env, content, stream_id, role, is_final)
+                asyncio.create_task(
+                    send_data(self.ten_env, content, stream_id, role, is_final)
+                )
         except Exception as e:
             self.ten_env.log_error(
                 f"Error send text data {role}: {content} {is_final} {e}"
