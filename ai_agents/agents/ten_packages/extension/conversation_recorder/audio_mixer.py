@@ -70,36 +70,36 @@ class AudioMixer:
             # Extend deque with samples
             self.buffers[source_id].extend(audio_array)
 
-    def mix_next_chunk(self) -> bytes:
-        """
-        Extracts `chunk_size` samples from all buffers, mixes them, and returns bytes.
-        If a buffer has insufficient data, it contributes 0 (silence) for the missing part.
-        If ALL buffers are empty, returns empty bytes (indicating no data to write).
-        """
+    def flush_source(self, source_id: str = None):
+        """Flush buffer for a specific source or all sources."""
         with self.lock:
-            # Check if any buffer has data
-            has_data = any(len(buf) > 0 for buf in self.buffers.values())
-            if not has_data:
-                return b""
+            if source_id is not None:
+                if source_id in self.buffers:
+                    self.buffers[source_id].clear()
+            else:
+                for buf in self.buffers.values():
+                    buf.clear()
 
-            # Initialize mixer buffer
-            mixed_chunk = np.zeros(self.chunk_size, dtype=np.float32)
+    def mix_samples(self, num_samples: int) -> bytes:
+        """
+        Extracts `num_samples` from all buffers, mixes them, and returns bytes.
+        If a buffer has fewer samples, silence is used for the missing part.
+        """
+        if num_samples <= 0:
+            return b""
 
-            # Mix each source
+        with self.lock:
+            mixed_chunk = np.zeros(num_samples, dtype=np.float32)
+
             for buf in self.buffers.values():
-                # Extract up to chunk_size samples
-                count = min(len(buf), self.chunk_size)
+                count = min(len(buf), num_samples)
                 if count > 0:
-                    # Create temporary array from deque slice
-                    # Iterating deque is fast enough for 960 items?
-                    # Ideally we'd chunk this better, but for python MVP this is readable.
-                    # Optimization: slice deque to list then array.
                     samples = [buf.popleft() for _ in range(count)]
-                    samples_arr = np.array(samples, dtype=np.float32)
+                    mixed_chunk[:count] += np.array(samples, dtype=np.float32)
 
-                    # Add to mix
-                    mixed_chunk[:count] += samples_arr
-
-            # Clip and convert to int16
             mixed_chunk = np.clip(mixed_chunk, -32768, 32767)
             return mixed_chunk.astype(np.int16).tobytes()
+
+    def mix_next_chunk(self) -> bytes:
+        """Extracts `chunk_size` samples and returns bytes."""
+        return self.mix_samples(self.chunk_size)
